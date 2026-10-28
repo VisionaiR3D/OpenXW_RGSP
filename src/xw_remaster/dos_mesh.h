@@ -19,11 +19,13 @@ typedef struct XwDosMark {
 
 typedef struct XwDosMeshLod {
 	XwSnapRange triangles, lines;
+	bool hd;
 	float radius; /* Conservative source-space sphere about the component origin. */
 } XwDosMeshLod;
 
 typedef struct XwDosMesh {
 	AeronBuffer *vertices, *indices, *marks, *mark_vertices;
+	AeronTexture* hd_texture;
 	uint16_t lod_count;
 	XwDosMeshLod* lods;
 } XwDosMesh;

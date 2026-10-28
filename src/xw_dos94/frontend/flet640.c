@@ -23,6 +23,7 @@
 #include <landru/view.h>
 #include <landru/viewadd.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 /* DOS94 0x540000. */
 XwShellSceneResult Dos94_Flet640_Play(struct XwShellContext* shell) {
@@ -95,10 +96,16 @@ XwShellSceneResult Dos94_Flet640_Play(struct XwShellContext* shell) {
 				break;
 		}
 	}
-	xfilm_Set_Film_Def_Palette(g_flet640Film, shell->standardPalette);
+	/* A failed CD/network resource load must not dereference a missing film.
+	 * Keep the ordinary scene task so it owns resource/background cleanup. */
+	if (g_flet640Film) {
+		xfilm_Set_Film_Def_Palette(g_flet640Film, shell->standardPalette);
+		Flet640_OpenMusic(resourceFile, g_flet640Film);
+		DsLand_LoadSoundEffects(resourceFile, g_flet640Film);
+	} else {
+		fprintf(stderr, "xw.cutscene: skipping unavailable fleet scene %d\n", shellext_Get_Cur_Scene());
+	}
 	xview_Set_View_Update_Function(Flet640_end_View);
-	Flet640_OpenMusic(resourceFile, g_flet640Film);
-	DsLand_LoadSoundEffects(resourceFile, g_flet640Film);
 	XwFlet640_RunView(resourceFile);
 }
 

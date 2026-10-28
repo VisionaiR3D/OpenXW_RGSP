@@ -1,6 +1,7 @@
 /* Native-resolution composition follows OpenXvT's retained Aeron draw-list path. */
 #include "xw_remaster/hud_renderer.h"
 #include "xw_remaster/hud_draw.h"
+#include "xw_remaster/cockpit_lighting.h"
 #include <aeron/aeron.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,9 @@ typedef struct HudKey {
 	XwRenderView view;
 	XwSnapTargetBox target;
 	int width, height;
+ int cockpit_light_mode;
+ uint64_t cockpit_scene_tick;
+ int32_t cockpit_world_light[3];
 } HudKey;
 
 typedef struct Ordered {
@@ -79,6 +83,9 @@ bool XwHudRenderer_Prepare(const XwRenderSnapshot* snapshot, const XwRenderView*
 				   .target = snapshot->target_box,
 				   .width = width,
 				   .height = height };
+ key.cockpit_light_mode=XwCockpitLighting_Mode();
+ key.cockpit_scene_tick=key.cockpit_light_mode?snapshot->simulation_ticks:0;
+ memcpy(key.cockpit_world_light,snapshot->appearance.direction_q15,sizeof key.cockpit_world_light);
 	if (view)
 		key.view = *view;
 	if (valid && !memcmp(&key, &prepared, sizeof key)) {
@@ -164,6 +171,7 @@ void XwHudRenderer_Draw(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRen
 }
 
 void XwHudRenderer_Shutdown(void) {
+ XwCockpitLighting_Reset();
 	AeronDrawList_Destroy(markers);
 	markers = NULL;
 	AeronDrawList_Destroy(list);

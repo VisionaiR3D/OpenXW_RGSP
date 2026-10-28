@@ -4,8 +4,10 @@ SamplerState palette_sampler : register(s0, space2);
 Texture2D<float> materials : register(t1, space2);
 SamplerState material_sampler : register(s1, space2);
 struct Mark { uint first; uint count; uint color; uint width; float max_depth; float3 anchor; };
-StructuredBuffer<Mark> marks : register(t2, space2);
-StructuredBuffer<float4> mark_vertices : register(t3, space2);
+Texture2D<float4> hd_texture : register(t2, space2);
+SamplerState hd_sampler : register(s2, space2);
+StructuredBuffer<Mark> marks : register(t3, space2);
+StructuredBuffer<float4> mark_vertices : register(t4, space2);
 cbuffer Draw : register(b0, space3) {
     float4 clip_x;
     float4 clip_y;
@@ -81,6 +83,49 @@ float3 smooth_ramp(uint row, float shade) {
          + ramp_color(row, entry + 1) * weights.z + ramp_color(row, entry + 2) * weights.w;
 }
 float4 main(Input v) : SV_Target0 {
+    if(((uint)v.info.y & 16u)!=0u){
+        float3 color;
+        float paint_coverage=0;
+        if(((uint)v.info.y & 64u)!=0u) {
+            uint grid=(uint)v.info.w, tile=(uint)v.info.z;
+            float2 cell=float2(tile%grid,tile/grid);
+            uint width,height;hd_texture.GetDimensions(width,height);
+            float2 inset=float2(grid/(float)width,grid/(float)height);
+            float2 uv=(cell+lerp(inset,1-inset,frac(v.uv)))/grid;
+            float4 sample=hd_texture.SampleGrad(hd_sampler,uv,ddx(v.uv)/grid,ddy(v.uv)/grid);
+            color=sample.rgb;paint_coverage=sample.a;
+        } else {
+            float4 sample=hd_texture.Sample(hd_sampler,v.uv);
+            color=((uint)v.info.y & 32u)!=0u ? float3(0.013,0.03,0.048) : sample.rgb;
+            paint_coverage=sample.a;
+        }
+        // Flag 128 opts in: legacy HD textures have opaque alpha, not a mask.
+        // DOS94 recolors material 14 through the same per-object offset as native geometry.
+        // RGB is the linear-light base/dirt contribution, alpha is paint coverage.
+        if (((uint)v.info.y & 128u)!=0u) {
+            uint paint_material=(uint)(14+(int)policy.z);
+            color+=paint_coverage*ramp_color(paint_material-1u,0);
+        }
+        float lighting=0.38+0.62*saturate(abs(v.shade));
+        if(policy.x > 0) {
+            // Use the same parent/blink state and native red target ramp as DOS
+            // distance meshes. UV textures must not bypass object selection.
+            uint target_material=(uint)round(materials.Load(int3(0,43,0))*255);
+            float detail=saturate(dot(color,float3(0.2126,0.7152,0.0722)));
+            float shade=clamp((1-lighting)*15+(0.5-detail)*4,0,15);
+            return float4(smooth_ramp(target_material-1u,shade),1);
+        }
+        // Training gates supply an independent tint for each original component.
+        if(policy.y > 0 && v.info.x > 0) {
+            uint material=(uint)v.info.x+(uint)policy.y;
+            if(material>0 && material<=(uint)options.z) {
+                float detail=saturate(dot(color,float3(0.2126,0.7152,0.0722)));
+                uint row=material==14u ? 39u+(uint)options.y : material-1u;
+                return float4(smooth_ramp(row,clamp((1-lighting)*15+(0.5-detail)*4,0,15)),1);
+            }
+        }
+        return float4(color*lighting,1);
+    }
     uint flags = (uint)v.info.y;
     if ((flags & 2u) == 0u && v.facing < 0) discard;
     uint color = (uint)v.info.x;

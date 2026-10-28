@@ -8,6 +8,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "xw_remaster/hd_graphics.h"
+#include "xw_app/settings/hd_graphics_ui.inc"
+
 static void HostControls(AeronUiContext* ui, XwSettings* draft) {
 	AeronUi_Header(ui, "Display");
 	AeronUi_Toggle(ui, "Fullscreen", &draft->fullscreen);
@@ -137,6 +140,7 @@ void XwVideoPage_Draw(AeronUiContext* ui, const AeronInputSnapshot* input) {
 	XwSettings* draft = XwSettingsMenu_Draft();
 	if (!AeronUi_BeginScroll(ui, "Video settings", XwSettingsMenu_ScrollHeight()))
 		return;
+	HdGraphicsSettings_Draw(ui);
 	HostControls(ui, draft);
 	FlightControls(ui, draft);
 	GameControls(ui, draft);

@@ -318,6 +318,13 @@ struct REGISTER_RegStringButton* Dos94_register_Alloc_Input_Reg_String_Button(
 int16_t Dos94_register_iupdate_Reg_String_Button(Input* input, Rect* frame, Rect* clip, int16_t key,
 												 int leftEvent, int rightEvent, int16_t x, int16_t y) {
 	REGISTER_RegStringButton* button = (REGISTER_RegStringButton*)input;
+#ifdef XW_MODERN
+ if(leftEvent) {
+  extern void XwPilotKeyboard_Request(REGISTER_RegStringButton*,int);
+  XwPilotKeyboard_Request(button,(button->is_filename_mode ? 8 : 20));
+ }
+#endif
+
 	char workingText[REGISTER_STRING_WORK_CAPACITY];
 	int16_t index;
 	int16_t length;

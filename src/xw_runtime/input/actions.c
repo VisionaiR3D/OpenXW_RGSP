@@ -1,6 +1,9 @@
 /* Registry shape follows OpenXvT; bytes come from X-Wing's recovered input consumers. */
 #include "xw_runtime/input/actions.h"
 #include <string.h>
+#include "xw_runtime/input/energy_distribution.h"
+#include "aeron/log.h"
+#include "xw/flight/player/user.h"
 
 static const struct {
 	const char *name, *label;
@@ -91,6 +94,36 @@ static const struct {
 	{ "frame_rate", "Frame rate display", XW_INPUT_ACTION_CATEGORY_SYSTEM, 0 },
 	{ "toggle_music", "Toggle music", XW_INPUT_ACTION_CATEGORY_SYSTEM, 140 },
 	{ "toggle_sound", "Toggle sound effects", XW_INPUT_ACTION_CATEGORY_SYSTEM, 146 },
+ {"engine_more","Meer motorenergie",XW_INPUT_ACTION_CATEGORY_WEAPONS,248},
+ {"engine_less","Minder motorenergie",XW_INPUT_ACTION_CATEGORY_WEAPONS,249},
+ {"energy_normalize","Energie normaal",XW_INPUT_ACTION_CATEGORY_WEAPONS,514},
+ {"cannon_recharge_increase","Lasers sneller opladen",XW_INPUT_ACTION_CATEGORY_WEAPONS,515},
+ {"cannon_recharge_decrease","Lasers langzamer opladen",XW_INPUT_ACTION_CATEGORY_WEAPONS,516},
+ {"shields_forward","Shields naar voren",XW_INPUT_ACTION_CATEGORY_WEAPONS,517},
+ {"shields_rear","Shields naar achteren",XW_INPUT_ACTION_CATEGORY_WEAPONS,518},
+ {"shields_balanced","Shields gelijk verdelen",XW_INPUT_ACTION_CATEGORY_WEAPONS,519},
+ {"weapon_group_previous","Vorig wapen",XW_INPUT_ACTION_CATEGORY_WEAPONS,520},
+ {"laser_rate_0","Laser laadstand 0",XW_INPUT_ACTION_CATEGORY_WEAPONS,530},
+ {"laser_rate_1","Laser laadstand 1",XW_INPUT_ACTION_CATEGORY_WEAPONS,531},
+ {"laser_rate_2","Laser laadstand 2",XW_INPUT_ACTION_CATEGORY_WEAPONS,532},
+ {"laser_rate_3","Laser laadstand 3",XW_INPUT_ACTION_CATEGORY_WEAPONS,533},
+ {"laser_rate_4","Laser laadstand 4",XW_INPUT_ACTION_CATEGORY_WEAPONS,534},
+ {"shield_rate_0","Shield laadstand 0",XW_INPUT_ACTION_CATEGORY_WEAPONS,535},
+ {"shield_rate_1","Shield laadstand 1",XW_INPUT_ACTION_CATEGORY_WEAPONS,536},
+ {"shield_rate_2","Shield laadstand 2",XW_INPUT_ACTION_CATEGORY_WEAPONS,537},
+ {"shield_rate_3","Shield laadstand 3",XW_INPUT_ACTION_CATEGORY_WEAPONS,538},
+ {"shield_rate_4","Shield laadstand 4",XW_INPUT_ACTION_CATEGORY_WEAPONS,539},
+ { "roll_left", "Roll links (vasthouden)", XW_INPUT_ACTION_CATEGORY_VIEW, 0 },
+ { "roll_right", "Roll rechts (vasthouden)", XW_INPUT_ACTION_CATEGORY_VIEW, 0 },
+ {"engine_level_0","Motorenergie 0",XW_INPUT_ACTION_CATEGORY_WEAPONS,560},
+ {"engine_level_1","Motorenergie 1",XW_INPUT_ACTION_CATEGORY_WEAPONS,561},
+ {"engine_level_2","Motorenergie 2",XW_INPUT_ACTION_CATEGORY_WEAPONS,562},
+ {"engine_level_3","Motorenergie 3",XW_INPUT_ACTION_CATEGORY_WEAPONS,563},
+ {"engine_level_4","Motorenergie 4",XW_INPUT_ACTION_CATEGORY_WEAPONS,564},
+ {"firing_single","Firing single",XW_INPUT_ACTION_CATEGORY_WEAPONS,570},
+ {"firing_pair","Firing pair",XW_INPUT_ACTION_CATEGORY_WEAPONS,571},
+ {"firing_linked","Firing linked",XW_INPUT_ACTION_CATEGORY_WEAPONS,572},
+ {"target_list_open","Open target list",XW_INPUT_ACTION_CATEGORY_TARGETING,0},
 };
 
 XwInputAction XwInputActions_FromName(const char* name) {
@@ -130,10 +163,28 @@ bool XwInputActions_Visible(XwInputAction action) {
 }
 
 bool XwInputActions_KeyboardBindable(XwInputAction action) {
-	return action > XW_INPUT_ACTION_NONE && action < XW_INPUT_ACTION_COUNT;
+	return action > XW_INPUT_ACTION_NONE && action < XW_INPUT_ACTION_ENGINE_MORE;
 }
 
 uint16_t XwInputActions_ReleaseKey(XwInputAction action) {
 	uint16_t key = XwInputActions_Key(action);
 	return key == 0xB2 ? 0xB2 : key > 0xB2 && key <= 0xBB ? 0xBA : 0;
+}
+
+void XwInputActions_EngineEnergy(XwInputAction action) {
+ if(!g_playerFlightState.craft) return;
+ CraftData* craft=g_playerFlightState.craft;
+ EnergyDistribution next=EnergyRedistribute(craft->laserRedirect,craft->shieldRedirect,
+   (craft->workingSubsystems & XW_CRAFT_SUBSYSTEM_SHIELDS)!=0,action==XW_INPUT_ACTION_ENGINE_MORE);
+ craft->laserRedirect=next.lasers; craft->shieldRedirect=next.shields;
+ Aeron_LogInfo("xw.energy","%s: lasers=%d shields=%d",XwInputActions_ToName(action),next.lasers,next.shields);
+}
+
+void XwInputActions_EnginePreset(int level) {
+ CraftData* craft=g_playerFlightState.craft;
+ if(!craft) return;
+ EnergyDistribution next=EnergyEnginePreset(level,(craft->workingSubsystems & XW_CRAFT_SUBSYSTEM_SHIELDS)!=0);
+ craft->laserRedirect=next.lasers;
+ craft->shieldRedirect=next.shields;
+ Aeron_LogInfo("xw.energy","engine preset %d: lasers=%d shields=%d",level,next.lasers,next.shields);
 }

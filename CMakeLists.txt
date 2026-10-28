@@ -919,6 +919,8 @@ set(XW_REMASTER_SOURCES
     src/xw_remaster/hud_asset_upload.c
     src/xw_remaster/hud_decode.c
     src/xw_remaster/hud_draw.c
+    src/xw_remaster/cockpit_lighting.c
+    src/xw_remaster/cockpit_scene_lighting.c
     src/xw_remaster/hud_instruments.c
     src/xw_remaster/hud_renderer.c
     src/xw_remaster/undither.c
@@ -1053,3 +1055,5 @@ else()
         COMMAND "${CMAKE_COMMAND}" -E false VERBATIM)
 endif()
 add_dependencies(format landru_format)
+
+target_sources(xw_core PRIVATE src/xw_runtime/input/combos.c)

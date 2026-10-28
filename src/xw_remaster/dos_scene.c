@@ -10,6 +10,8 @@
 #include <aeron/scene/draw_list2d.h>
 #include <math.h>
 #include <string.h>
+#include <stdio.h>
+#include "xw_runtime/snapshot/render_dos_assets.h"
 
 typedef struct DosFailure {
 	uint64_t mission, world, config;
@@ -58,12 +60,15 @@ bool XwDosScene_PrepareResources(int w, int h) {
 		   XwDosSprites_Begin(AeronScene_SampleCount(scene));
 }
 
-static bool Fail(DosFailure key) {
+static bool Fail(DosFailure key, const char* stage) {
+	Aeron_LogError("xw.render", "DOS scene failed: stage=%s mission=%llu world=%llu assets=%llu size=%dx%d", stage, (unsigned long long)key.mission, (unsigned long long)key.world, (unsigned long long)key.assets, key.width, key.height);
 	failed = key;
 	XwSpecialWorld_Shutdown();
 	XwDosScene_Invalidate();
 	XwDosSky_Shutdown();
-	Aeron_RequestFatalRendererError("DOS flight scene preparation");
+	char context[200];
+	snprintf(context,sizeof context,"DOS flight scene preparation: %s",stage);
+	Aeron_RequestFatalRendererError(context);
 	return false;
 }
 
@@ -117,13 +122,38 @@ static bool Select(const XwRenderSnapshot* s, const XwPreparedFlight* frame) {
 	XwDosSelection selection;
 	for (unsigned i = 0; i < s->object_count; ++i) {
 		if (!XwDosShip_Select(s, &set->bindings, &s->objects[i], &frame->view,
-							  XwComponentAnimation_Angles(&s->objects[i], false), &selection))
+							  XwComponentAnimation_Angles(&s->objects[i], false), &selection)) {
+			const XwSnapObject* o=&s->objects[i];
+			Aeron_LogError("xw.render","Ship selection failed: kind=%u slot=%u generation=%u type=%u genus=%u source_type=%u craft=%u animation=%u secondary=%u state=%u objects=%u crafts=%u",o->id.kind,o->id.slot,o->id.generation,o->type,o->genus,o->source_type,o->craft_index,o->animation_state,o->secondary_animation_state,o->state,s->object_count,s->craft_count);
+			if(o->type<set->bindings.type_count){
+			 const XwSnapType* t=&set->bindings.types[o->type];
+			 const XwRenderSource* g=XwRenderAssets_Source(t->geometry);
+			 const XwRenderSource* d=XwRenderAssets_Source(t->dos_components);
+			 if(g&&g->kind==XW_SOURCE_DOS_MODEL&&g->size==sizeof(XwRenderDosModel)){
+			  const XwRenderDosModel* m=g->data;
+			  Aeron_LogError("xw.render","Model metadata: geometry=%llu components=%u nodes=%u lods=%u clamp=%u",(unsigned long long)t->geometry,m->component_count,m->node_count,m->lod_count,m->clamp_components);
+			 }
+			 if(d&&d->kind==XW_SOURCE_DOS_COMPONENTS&&d->size>=sizeof(XwRenderDosDescriptors)){
+			  const XwRenderDosDescriptors* desc=d->data;
+			  Aeron_LogError("xw.render","Descriptor metadata: count=%u components=%u variants=%u",desc->count,desc->component_count,desc->variant_count);
+			 }
+			}
+			if(o->craft_index<s->craft_count){
+			 const XwSnapCraft* c=&s->crafts[o->craft_index];
+			 for(unsigned j=0;j<c->component_count&&j<XW_SNAP_COMPONENTS;j++)
+			  Aeron_LogError("xw.render","Component %u: state=%u hp=%u rotation=%u",j,c->component_state[j],c->component_hp[j],c->mesh_rotation[j]);
+			}
 			return false;
-		if (!XwDosSprites_Effects(s, &frame->view, &selection))
+		}
+		if (!XwDosSprites_Effects(s, &frame->view, &selection)) {
+			Aeron_LogError("xw.render","Object effects failed: slot=%u type=%u bitmaps=%u",s->objects[i].id.slot,s->objects[i].type,selection.bitmap_count);
 			return false;
+		}
 		for (unsigned part = 0; part < selection.part_count; ++part)
-			if (!XwDosDraw_Add(&selection.parts[part]))
+			if (!XwDosDraw_Add(&selection.parts[part])) {
+				Aeron_LogError("xw.render","Mesh submission failed: slot=%u type=%u part=%u geometry=%llu lod=%u component=%u",s->objects[i].id.slot,s->objects[i].type,part,(unsigned long long)selection.parts[part].geometry,selection.parts[part].lod,selection.parts[part].component);
 				return false;
+			}
 	}
 	return true;
 }
@@ -154,20 +184,21 @@ bool XwDosScene_Frame(const XwRenderSnapshot* s, const XwPreparedFlight* frame) 
 	if (!reset && !frame->render_needed && palette_revision == s->appearance.palette_revision)
 		return true;
 	XwDosScene_Invalidate();
-	if (!Ensure(w, h, msaa) || !AeronScene_Begin(scene, &frame->view.camera))
-		return Fail(key);
-	AeronCommandBuffer* cmd = Aeron_AcquireCommandBuffer();
-	if (!cmd)
-		return Fail(key);
-	if (!XwDosDraw_Begin(cmd, s, &frame->view, (AeronSampleCount)msaa) ||
-		!XwDosSprites_Begin((AeronSampleCount)msaa) || !Select(s, frame) ||
-		!XwSpecialWorld_Prepare(cmd, scene, s, frame, reset) ||
-		!XwDosSky_Prepare(cmd, scene, s, &frame->view) || !XwDosSprites_Upload(cmd) ||
-		!PrepareBars(cmd, frame) || !XwDosDraw_Upload(cmd) ||
-		!XwHudRenderer_PrepareWorldMarkers(cmd, s, &frame->view, scene)) {
-		Aeron_CancelCommandBuffer(cmd);
-		return Fail(key);
-	}
+	if (!Ensure(w,h,msaa)) return Fail(key,"render target allocation");
+	if (!AeronScene_Begin(scene,&frame->view.camera)) return Fail(key,"scene begin");
+	AeronCommandBuffer* cmd=Aeron_AcquireCommandBuffer();
+	if (!cmd) return Fail(key,"command buffer acquisition");
+#define XW_PREPARE_STAGE(label, expression) do { if (!(expression)) { Aeron_CancelCommandBuffer(cmd); return Fail(key,label); } } while(0)
+	XW_PREPARE_STAGE("mesh resources", XwDosDraw_Begin(cmd,s,&frame->view,(AeronSampleCount)msaa));
+	XW_PREPARE_STAGE("sprite resources", XwDosSprites_Begin((AeronSampleCount)msaa));
+	XW_PREPARE_STAGE("object selection and submission", Select(s,frame));
+	XW_PREPARE_STAGE("special world", XwSpecialWorld_Prepare(cmd,scene,s,frame,reset));
+	XW_PREPARE_STAGE("sky", XwDosSky_Prepare(cmd,scene,s,&frame->view));
+	XW_PREPARE_STAGE("sprite upload", XwDosSprites_Upload(cmd));
+	XW_PREPARE_STAGE("letterbox bars", PrepareBars(cmd,frame));
+	XW_PREPARE_STAGE("mesh upload", XwDosDraw_Upload(cmd));
+	XW_PREPARE_STAGE("target markers", XwHudRenderer_PrepareWorldMarkers(cmd,s,&frame->view,scene));
+#undef XW_PREPARE_STAGE
 	unsigned background = s->special.surface_active && s->camera.rows[8] < -0.75f ? 0xB1 : 0xF7;
 	float clear[4] = { 0, 0, 0, 1 };
 	for (unsigned a = 0; a < 3; ++a) {
@@ -180,10 +211,10 @@ bool XwDosScene_Frame(const XwRenderSnapshot* s, const XwPreparedFlight* frame) 
 	AeronScene_SetPassHook(scene, AERON_SCENE_HOOK_AFTER_UPSCALE, Hud, scene);
 	if (!AeronScene_Render(scene, cmd)) {
 		Aeron_CancelCommandBuffer(cmd);
-		return Fail(key);
+		return Fail(key,"scene rendering");
 	}
 	if (!Aeron_SubmitCommandBuffer(cmd))
-		return Fail(key);
+		return Fail(key,"command buffer submission");
 	output = (XwFlightOutput) { .texture = Aeron_RenderTargetGetTexture(AeronScene_SceneRt(scene)),
 								.key = s->key,
 								.width = w,

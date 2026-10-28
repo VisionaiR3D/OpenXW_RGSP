@@ -3,6 +3,7 @@
 #include "xw_app/settings/settings.h"
 #include "xw_runtime/runtime/profile.h"
 #include <string.h>
+#include "xw_runtime/input/combos.h"
 
 static XwGameVersion VersionSelector(AeronUiContext* ui, const char* label, char* value, bool flight,
 									 const char* inheritVersion) {
@@ -81,6 +82,7 @@ void XwGamePage_Draw(AeronUiContext* ui, const AeronInputSnapshot* input) {
 			p->classicMissions = (uint8_t)value;
 	}
 	AeronUi_Header(ui, "Flight Gameplay");
+ int lead=XwCombos_LeadEnabled();if(AeronUi_Toggle(ui,"Lead crosshair (lasers / ions)",&lead)&&!XwCombos_SetLead(lead!=0))XwSettingsMenu_ReportError("Could not save lead crosshair.");
 	static const char* const off_on[] = { "Off", "On" };
 	static const char* const vulnerability[] = { "Vulnerable", "Invulnerable" };
 	static const char* const ammunition[] = { "Limited", "Unlimited" };

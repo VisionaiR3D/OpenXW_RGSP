@@ -39,7 +39,7 @@ static AeronGraphicsPipeline *opaque, *bolt;
 static AeronSampleCount samples;
 static AeronBuffer* tables;
 static AeronTexture *palette, *materials;
-static AeronSampler* sampler;
+static AeronSampler *sampler, *hd_sampler;
 static DosTable* cpu_tables;
 static DosDraw* draws;
 static uint32_t count, table_capacity, draw_capacity, gpu_capacity;
@@ -96,7 +96,7 @@ bool XwDosDraw_PrepareResources(AeronSampleCount msaa) {
 																  .stage = AERON_SHADER_STAGE_FRAGMENT,
 																  .uniform_buffer_count = 1,
 																  .storage_buffer_count = 2,
-																  .sampler_count = 2 });
+																  .sampler_count = 3 });
 	if (!vertex_shader || !fragment_shader)
 		return false;
 	if (!opaque || samples != msaa) {
@@ -132,7 +132,8 @@ bool XwDosDraw_PrepareResources(AeronSampleCount msaa) {
 								  .mip_count = 1,
 								  .format = AERON_TEXTURE_FORMAT_R8_UNORM,
 								  .usage = AERON_TEXTURE_USAGE_SAMPLED | AERON_TEXTURE_USAGE_TRANSFER_DST });
-	return sampler && palette && materials;
+	if(!hd_sampler)hd_sampler=Aeron_CreateSampler(&(AeronSamplerDesc){.min_filter=AERON_FILTER_LINEAR,.mag_filter=AERON_FILTER_LINEAR,.mip_filter=AERON_FILTER_LINEAR,.max_lod=11,.address_u=AERON_ADDRESS_CLAMP_TO_EDGE,.address_v=AERON_ADDRESS_CLAMP_TO_EDGE});
+    return sampler && palette && materials && hd_sampler;
 }
 
 bool XwDosDraw_Begin(AeronCommandBuffer* cmd, const XwRenderSnapshot* s, const XwRenderView* view,
@@ -173,6 +174,23 @@ bool XwDosDraw_Begin(AeronCommandBuffer* cmd, const XwRenderSnapshot* s, const X
 	version = s->flight_version;
 	material_count = m->material_count;
 	target = s->appearance.target_highlight;
+    /* Suppress close-up blinking for the entire object, not individual meshes
+     * or LODs. Use half the original game's size-relative near-target boundary
+     * (16 times maxBoundsExtent), measured from the camera. */
+    for (unsigned i = 0; i < s->object_count; ++i) {
+        const XwSnapObject* object = &s->objects[i];
+        if (object->source_ref != target || object->type >= set->bindings.type_count)
+            continue;
+        double near_distance = 16.0 * set->bindings.types[object->type].max_extent;
+        double distance_squared = 0;
+        for (unsigned axis = 0; axis < 3; ++axis) {
+            double delta = (double)object->world_pos[axis] - s->camera.world_pos[axis];
+            distance_squared += delta * delta;
+        }
+        if (near_distance > 0 && distance_squared < near_distance * near_distance)
+            target = UINT16_MAX;
+        break;
+    }
 	gouraud = version == 94 && s->appearance.gouraud_enabled;
 	memcpy(gates, m->gate, sizeof gates);
 	memcpy(view_uniform.view_proj, view->view_proj, sizeof view_uniform.view_proj);
@@ -200,7 +218,11 @@ bool XwDosDraw_AddMesh(const XwDosPart* part, const XwDosMesh* mesh) {
 	float depth = 0;
 	for (unsigned a = 0; a < 3; ++a)
 		depth += current_view.view_proj[12 + a] * part->transform[4 * a + 3];
-	float margin = fmaxf(1, fabsf(depth) / 128);
+	XwDosPart distant;
+    if(mesh->lods[part->lod].hd && part->lod+1<mesh->lod_count && !mesh->lods[part->lod+1].hd && fabsf(depth)>mesh->lods[part->lod].radius*scale*40){
+        distant=*part;distant.lod++;part=&distant;
+    }
+    float margin = fmaxf(1, fabsf(depth) / 128);
 	if (!XwShip_Visible(
 			&current_view, part->transform,
 			(part->hyperstar
@@ -285,6 +307,7 @@ void XwDosDraw_Pass(AeronCommandBuffer* cmd, AeronRenderPass* pass, int width, i
 			Aeron_BindUniformData(pass, AERON_SHADER_STAGE_VERTEX, 1, &draw->vertex_uniform,
 								  sizeof draw->vertex_uniform);
 			Aeron_BindUniformData(pass, AERON_SHADER_STAGE_FRAGMENT, 0, &draw->uniform, sizeof draw->uniform);
+			Aeron_BindTextureSampler(pass,AERON_SHADER_STAGE_FRAGMENT,2,draw->mesh->hd_texture ? draw->mesh->hd_texture : palette,hd_sampler);
 			Aeron_BindVertexBuffer(pass, 0, draw->mesh->vertices, 0);
 			Aeron_BindIndexBuffer(pass, draw->mesh->indices, AERON_INDEX_FORMAT_UINT32, 0);
 			Aeron_BindStorageBuffer(pass, AERON_SHADER_STAGE_FRAGMENT, 0, draw->mesh->marks);
@@ -307,6 +330,8 @@ void XwDosDraw_Shutdown(void) {
 	Aeron_DestroyTexture(palette);
 	Aeron_DestroyTexture(materials);
 	Aeron_DestroySampler(sampler);
+	Aeron_DestroySampler(hd_sampler);
+	hd_sampler=NULL;
 	free(cpu_tables);
 	free(draws);
 	opaque = bolt = NULL;

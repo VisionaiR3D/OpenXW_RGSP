@@ -1,3 +1,6 @@
+#include "xw/flight/player/user.h"
+#include "xw_runtime/runtime/profile.h"
+#include <string.h>
 #include "xw/flight/feinput.h"
 #include "xw/flight/flight_display.h"
 #include "xw/flight/hud/panel.h"
@@ -69,4 +72,26 @@ void XwHud_Target(uint16_t reference, uint16_t component, int extent, uint8_t co
 										.color_index = color,
 										.visible = 1,
 										.direct_overlay = overlay };
+}
+
+/* DOS94 has no classic world-space target box to publish. Reuse the same
+ * captured object identity/position as the world renderer, including statics.
+ * Never retain a marker for an empty, destroyed or reused target slot. */
+void XwHud_DosTarget(void) {
+ XwRenderSnapshot* s=XwRenderCapture_Pending();
+ if(!s) return;
+ s->target_box=(XwSnapTargetBox){0};
+ if(!s->world_valid || s->camera.replay_mode) return;
+ XwSnapObjectId id=XwRenderObjects_Id(g_playerFlightState.currentTargetObjectIdx);
+ if(!id.kind || (id.kind==s->camera.player.kind && id.slot==s->camera.player.slot)) return;
+ for(unsigned i=0;i<s->object_count;i++) {
+  const XwSnapObject* o=&s->objects[i];
+  if(o->id.kind!=id.kind || o->id.slot!=id.slot || o->id.generation!=id.generation) continue;
+  if(o->type>=XwProfile_ActiveFlight()->model_count) return;
+  s->target_box=(XwSnapTargetBox){.object=id,.extent=g_modelTypeTable[o->type].maxBoundsExtent,
+    .component=UINT16_MAX,.color_index=0x3b,.visible=1};
+  if(s->target_box.extent<0) s->target_box.extent=0;
+  memcpy(s->target_box.world_pos,o->world_pos,sizeof o->world_pos);
+  return;
+ }
 }

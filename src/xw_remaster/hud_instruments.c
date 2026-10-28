@@ -104,7 +104,19 @@ static void TargetStrip(const XwHudDraw* d, const XwRenderView* view, float x, f
 								   AERON_BLIT2D_BLEND_PMA, &clip);
 }
 
+
+static void XwHudDraw_Lead(const XwHudDraw*d,const XwRenderView*view){
+ float x,y,z;if(!view||!d->snapshot->lead_visible||!XwRenderMath_ProjectWorld(view,d->snapshot->lead_world_pos,&x,&y,&z))return;
+ float scale=fmaxf(1.f,d->layout.target_height/480.f),arm=5*scale,gap=2*scale,thick=scale;
+ if(x<arm+gap||y<arm+gap||x>d->layout.target_width-arm-gap||y>d->layout.target_height-arm-gap)return;
+ AeronRectI clip={0,0,d->layout.target_width,d->layout.target_height};
+ const float cyan[]={0.03f,0.9f,1.f,1.f},black[]={0,0,0,1};
+ float rects[4][4]={{x-gap-arm,y-thick*.5f,arm,thick},{x+gap,y-thick*.5f,arm,thick},{x-thick*.5f,y-gap-arm,thick,arm},{x-thick*.5f,y+gap,thick,arm}};
+ for(int i=0;i<4;i++){float*r=rects[i];AeronDrawList_AddFill(d->list,r[0]-scale,r[1]-scale,r[2]+2*scale,r[3]+2*scale,black,AERON_BLIT2D_BLEND_PMA,&clip);AeronDrawList_AddFill(d->list,r[0],r[1],r[2],r[3],cyan,AERON_BLIT2D_BLEND_PMA,&clip);}
+}
+
 void XwHudDraw_Target(const XwHudDraw* d, const XwRenderView* view) {
+ XwHudDraw_Lead(d,view);
 	const XwSnapTargetBox* box = &d->snapshot->target_box;
 	float x, y, depth;
 	if (!view || !box->visible || !XwRenderMath_ProjectWorld(view, box->world_pos, &x, &y, &depth))
@@ -113,12 +125,15 @@ void XwHudDraw_Target(const XwHudDraw* d, const XwRenderView* view) {
 	float projected = camera->focal_x * (float)box->extent / depth;
 	/* Targeting_DrawObjectBox truncates before padding and centering in classic pixels. */
 	int size =
-		(int)fminf(fmaxf(projected, camera->screen_width == 320 ? 4 : 8), camera->screen_width * .75f) + 4;
+		(int)fminf(fmaxf(projected, d->snapshot->flight_version != 98 ? 8 : (camera->screen_width == 320 ? 4 : 8)), camera->screen_width * .75f) + 4;
 	int corner = size >> 3;
 	if (corner < 3)
 		corner = 3;
 	float rgba[4];
 	XwHudDraw_Color(d, box->color_index, true, rgba);
+	if (d->snapshot->flight_version != 98) {
+		rgba[0]=1.0f; rgba[1]=0.85f; rgba[2]=0.0f; rgba[3]=1.0f;
+	}
 	float scale_x = view->classic_pixel_scale_x, scale_y = view->classic_pixel_scale_y;
 	x -= (size / 2) * scale_x;
 	y -= (size / 2) * scale_y;

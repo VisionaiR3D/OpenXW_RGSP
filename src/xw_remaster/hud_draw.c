@@ -1,4 +1,5 @@
 #include "xw_remaster/hud_draw.h"
+#include "xw_remaster/cockpit_lighting.h"
 #include <math.h>
 
 void XwHudDraw_Color(const XwHudDraw* draw, unsigned color, bool indexed, float rgba[4]) {
@@ -128,10 +129,33 @@ bool XwHudDraw_Base(const XwHudDraw* d) {
 	if (!image || !coverage)
 		return false;
 	bool mirrored = d->snapshot->cockpit.mirrored;
+ bool lighting=XwCockpitLighting_Prepare(d);
 	XwSnapRect full = { 0, 0, d->definition->width, d->definition->height };
 	/* OpenXvT's coverage rectangles share one texture and batch into one draw. */
 	for (unsigned i = 0; i < coverage->count; ++i) {
 		const AeronImageCoverageRect* r = &coverage->rects[i];
+        if(lighting) {
+            int bottom=r->y+r->height,right=r->x+r->width;
+            for(int y=r->y;y<bottom;) {
+                int h=4-y%4;if(h>bottom-y)h=bottom-y;
+                for(int x=r->x;x<right;) {
+                    int w=4-x%4;if(w>right-x)w=right-x;
+                    const float* tint=XwCockpitLighting_Tint(x,y);
+                    /* Coalesce identical neighboring tints, especially protected
+                     * instrument faces. All pieces still share one texture batch. */
+                    while(x+w<right) {
+                        const float* next=XwCockpitLighting_Tint(x+w,y);
+                        if(tint[0]!=next[0]||tint[1]!=next[1]||tint[2]!=next[2])break;
+                        int more=4;if(more>right-x-w)more=right-x-w;w+=more;
+                    }
+                    if(!Sprite(d,image,(AeronSpriteRect){x,y,w,h},
+                        (XwSnapRect){x,y,w,h},full,false,tint))return false;
+                    x+=w;
+                }
+                y+=h;
+            }
+            continue;
+        }
 		int x = mirrored ? d->definition->width - r->x - r->width : r->x;
 		if (!Sprite(d, image, (AeronSpriteRect) { r->x, r->y, r->width, r->height },
 					(XwSnapRect) { x, r->y, r->width, r->height }, full, mirrored, NULL))

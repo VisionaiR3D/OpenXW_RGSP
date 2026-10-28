@@ -54,7 +54,9 @@ static void XwControllerMapping_DispatchAction(XwInputAction action, bool presse
 }
 
 static void XwControllerMapping_Dispatch(XwInputAction action, bool pressed) {
+
 	bool held = action == XW_INPUT_ACTION_FIRE_WEAPON || action == XW_INPUT_ACTION_TARGET_ROLL_MODIFIER ||
+                action == XW_INPUT_ACTION_ROLL_LEFT || action == XW_INPUT_ACTION_ROLL_RIGHT ||
 				XwInputActions_ReleaseKey(action) != 0;
 	if (held) {
 		if (pressed) {
@@ -298,7 +300,10 @@ static void SampleAnalog(size_t index, const AeronControllerSnapshot* device) {
 		} else {
 			float normalized = (float)raw / 32768;
 			int value = fabsf(normalized) > binding.deadzone ? (int)(normalized * 127) : 0;
-			g_controller.menu_axes[axis] = binding.invert ? -value : value;
+			/* H700 menu cursor follows screen directions, independent of flight pitch. */
+            bool menu_invert=binding.invert;
+            if(!strcmp(device->name,"H700 Gamepad") && axis==XW_INPUT_AXIS_PITCH) menu_invert=false;
+            g_controller.menu_axes[axis] = menu_invert ? -value : value;
 			g_controller.axes[axis] =
 				XwControllerOptions_EffectiveAxisInvert(model->kind, (XwInputAxis)axis, binding.invert)
 					? -value
@@ -394,7 +399,14 @@ bool XwControllerMapping_ThrottleSample(uint16_t* position, uint32_t* generation
 
 int XwControllerMapping_Present(void) { return g_controller.present; }
 
-int XwControllerMapping_Axis(XwInputAxis axis) { return (unsigned)axis < 3 ? g_controller.axes[axis] : 0; }
+int XwControllerMapping_Axis(XwInputAxis axis) {
+ if ((unsigned)axis >= 3) return 0;
+ int value = g_controller.axes[axis];
+ if (axis == XW_INPUT_AXIS_ROLL)
+  value += 127 * ((g_controller.holds[XW_INPUT_ACTION_ROLL_RIGHT] != 0) -
+                 (g_controller.holds[XW_INPUT_ACTION_ROLL_LEFT] != 0));
+ return value < -127 ? -127 : value > 127 ? 127 : value;
+}
 
 int XwControllerMapping_MenuAxis(XwInputAxis axis) {
 	return (unsigned)axis < 3 ? g_controller.menu_axes[axis] : 0;
@@ -430,3 +442,5 @@ void XwControllerMapping_ReleaseCommands(void) {
 		}
 	}
 }
+
+void XwControllerMapping_InjectAction(XwInputAction action,bool pressed) { XwControllerMapping_Dispatch(action,pressed); }

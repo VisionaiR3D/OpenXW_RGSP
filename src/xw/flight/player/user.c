@@ -1,3 +1,5 @@
+#include "xw_runtime/input/combos.h"
+#include "xw_runtime/input/actions.h"
 #include "xw/flight/player/user.h"
 
 #ifdef XW_MODERN
@@ -245,7 +247,37 @@ void user_userinterface(void) {
 	} else {
 		feinput_getrawinput();
 		feinput_checkinput();
-		switch (g_currentActionKey) {
+
+
+ if(g_playerFlightState.craft) {
+  CraftData* craft=g_playerFlightState.craft;
+  switch(g_currentActionKey) {
+
+   case 570: case 571: case 572: {
+    int desired=g_currentActionKey-569,bank=g_playerFlightState.selectedWeaponBank;
+    if(g_playerFlightState.selectedWeaponMode){
+     if(bank>=2||desired==2){g_currentActionKey=0;break;}
+     craft->warheadLauncherFlags[bank]=(craft->warheadLauncherFlags[bank]&~2u)|(desired==1?2:0);
+    }else{
+     if(bank>=4){g_currentActionKey=0;break;}
+     int cannons=g_craftTypeDefs[g_playerFlightState.craftTypeIndex].laserGroupSlotCount[bank];
+     if(cannons<2||(desired==2&&cannons!=4)){g_currentActionKey=0;break;}
+     craft->laserState.linkMode[bank]=desired==1?3:desired==2?1:cannons==4?2:1;
+    }
+    g_currentActionKey='x';break;
+   }
+   case 514: craft->laserRedirect=2; if(craft->workingSubsystems & XW_CRAFT_SUBSYSTEM_SHIELDS) craft->shieldRedirect=2; g_currentActionKey=0; break;
+   case 515: g_currentActionKey=craft->laserRedirect<4 ? USER_KEY_LASER_RECHARGE : 0; break;
+   case 516: if(craft->laserRedirect>0) { craft->laserRedirect=craft->laserRedirect==1 ? 4 : craft->laserRedirect-2; g_currentActionKey=USER_KEY_LASER_RECHARGE; } else g_currentActionKey=0; break;
+   case 517: case 518: case 519:
+    if(craft->workingSubsystems & XW_CRAFT_SUBSYSTEM_SHIELDS) {
+     int mode=g_currentActionKey==517 ? LASER_SHIELD_DISTRIBUTE_FRONT : g_currentActionKey==518 ? LASER_SHIELD_DISTRIBUTE_REAR : 1;
+     craft->shieldDistribMode=mode==0 ? 2 : mode-1;
+    }
+    g_currentActionKey='s'; break;
+  }
+ }
+	switch (g_currentActionKey) {
 			case USER_KEY_REBUILD_COCKPIT:
 				if (g_flightAudioMode != 0) {
 					optionsVolume = hilevel_ImGetMasterVol();
@@ -526,7 +558,21 @@ void user_inputforplane(void) {
 	}
 	feinput_degitterinput();
 	g_scaledInputPitch *= 2;
+ /* Process exact charge commands in the shared modern/classic flight path. */
+ if(g_playerFlightState.craft && g_currentActionKey>=530 && g_currentActionKey<=539) {
+  int index=g_currentActionKey-530, level=index%5;
+  int previous=level ? level-1 : 4;
+  if(index<5) { g_playerFlightState.craft->laserRedirect=previous; g_currentActionKey=USER_KEY_LASER_RECHARGE; }
+  else {
+   if(g_playerFlightState.craft->workingSubsystems & XW_CRAFT_SUBSYSTEM_SHIELDS) g_playerFlightState.craft->shieldRedirect=previous;
+   g_currentActionKey=USER_KEY_SHIELD_RECHARGE;
+  }
+ }
 	switch (g_currentActionKey) {
+ case 560: case 561: case 562: case 563: case 564: XwInputActions_EnginePreset(g_currentActionKey-560); break;
+ case 248: XwInputActions_EngineEnergy(XW_INPUT_ACTION_ENGINE_MORE); break;
+ case 249: XwInputActions_EngineEnergy(XW_INPUT_ACTION_ENGINE_LESS); break;
+
 		case 'o':
 			g_playerFlightState.currentTargetObjectIdx = XW_PLAYER_NO_TARGET;
 			break;
@@ -736,9 +782,15 @@ void user_inputforplane(void) {
 			msg_messageprintf(XW_MSG_ENGINE_THROTTLE_SETTING);
 			break;
 		}
+		case 520:
 		case 'w': {
-			uint8_t mode = g_playerFlightState.selectedWeaponMode;
-			uint8_t bank = ++g_playerFlightState.selectedWeaponBank;
+   uint8_t mode=g_playerFlightState.selectedWeaponMode;
+   uint8_t bank=g_playerFlightState.selectedWeaponBank;
+   if(g_currentActionKey==520) {
+    int lasers=g_playerFlightState.craft->cannonClassCount, missiles=g_playerFlightState.craft->warheadLauncherCount;
+    int total=lasers+missiles;
+    if(total) { int index=bank+(mode ? lasers : 0); index=(index+total-1)%total; mode=index>=lasers; bank=index>=lasers ? index-lasers : index; g_playerFlightState.selectedWeaponMode=mode; g_playerFlightState.selectedWeaponBank=bank; }
+   } else { bank=++g_playerFlightState.selectedWeaponBank;
 			if (mode != 0) {
 				if (bank >= g_playerFlightState.craft->warheadLauncherCount) {
 					if (g_playerFlightState.craft->cannonClassCount != 0) {
@@ -756,6 +808,8 @@ void user_inputforplane(void) {
 				bank = 0;
 				g_playerFlightState.selectedWeaponBank = 0;
 			}
+   }
+
 			g_msgArgTable[1] = XW_MSG_SUBSYSTEM_DAMAGED_AND_INOPERATIVE;
 			if (mode == 0) {
 				if ((g_playerFlightState.craft->workingSubsystems & LASER_CANNON_SUBSYSTEM_MASK) != 0)
@@ -1512,6 +1566,10 @@ void user_inputforplane(void) {
 			g_playerFlightState.smoothedTurnInput.roll = 0;
 			g_playerFlightState.smoothedTurnInput.pitch = 0;
 		}
+		if(XwCombos_AssistActive() && !mode){
+   if(!g_scaledInputYaw)g_playerFlightState.smoothedTurnInput.roll=0;
+   if(!g_scaledInputPitch)g_playerFlightState.smoothedTurnInput.pitch=0;
+  }
 		g_playerFlightState.previousRollModifierMode = mode;
 #ifdef XW_MODERN
 		if (XwFlightTiming_IsUnlocked()) {

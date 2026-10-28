@@ -93,7 +93,7 @@ static void ImportPilotsFrom(PilotImport* import, const XwInstallation* installa
 	import->root = installation->root;
 	/* GOG's DOS CD mount hides the loose pilot presets beside its disc image. */
 	AeronVfs* loose = AeronVfs_Create(&(AeronVfsConfig) {
-		.org_name = "TotallyOpen", .app_name = "OpenXW", .asset_root = installation->root });
+		.org_name = "TotallyOpen", .app_name = "OpenXW-HD", .asset_root = installation->root });
 	AeronFileInfo info;
 	if (loose &&
 		AeronVfs_SetRootOptions(loose, AERON_VFS_ROOT_ASSET, AERON_VFS_ROOT_OPTION_CASE_INSENSITIVE_LOOKUP) &&

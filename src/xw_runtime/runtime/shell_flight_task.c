@@ -18,6 +18,8 @@
 #include "xw_runtime/storage/replay_format.h"
 #include <landru/task.h>
 #include <stdio.h>
+#include "xw_runtime/storage/save_slots.h"
+static bool resume_slot_boot;
 #include <stdlib.h>
 #include <string.h>
 
@@ -89,7 +91,8 @@ static LandruTaskStepResult shell_flight_step(void* self) {
 		xmain_main(state->nextScene, &g_legacyMemoryConfig);
 		return LANDRU_TASK_STEP_YIELD;
 	}
-	XwShellSceneId flightScene = XwFrontend_Result();
+	XwShellSceneId flightScene = resume_slot_boot ? XW_SCENE_FLIGHT_RESUME : XwFrontend_Result();
+	resume_slot_boot=false;
 	if (flightScene == XW_SCENE_EXIT_SHELL)
 		return LANDRU_TASK_STEP_DONE;
 	char error[256];

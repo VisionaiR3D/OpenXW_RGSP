@@ -3,6 +3,7 @@
 #include "xw_runtime/snapshot/render_capture.h"
 #include "xw_runtime/snapshot/render_cockpit_assets.h"
 struct XwRadarBlip;
+void XwHud_DosTarget(void);
 void XwHud_Target(uint16_t reference, uint16_t component, int extent, uint8_t color, bool overlay);
 void XwHud_Reset(void);
 void XwHud_Enable(bool enabled);

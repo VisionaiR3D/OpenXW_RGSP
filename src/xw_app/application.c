@@ -100,7 +100,7 @@ int XwApplication_Run(const XwLaunchOptions* options) {
 			return 1;
 		}
 		AeronVfs* vfs = AeronVfs_Create(&(AeronVfsConfig) {
-			.org_name = "TotallyOpen", .app_name = "OpenXW", .resource_root = resource_root });
+			.org_name = "TotallyOpen", .app_name = "OpenXW-HD", .resource_root = resource_root });
 		XwStorage_Bind(vfs);
 		int success = vfs && XwSetup_Run(options, NULL, error, sizeof error) == XW_SETUP_SUCCESS;
 		if (!success)

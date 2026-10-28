@@ -11,7 +11,6 @@
 #include "xw/flight/mission/mission.h"
 #include "xw/flight/xw.h"
 
-#include <landru/host_timing.h>
 #include <landru/task.h>
 #include <landru/timer.h>
 #include <stdbool.h>

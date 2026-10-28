@@ -181,8 +181,10 @@ static bool Craft(Selection* c, const XwRenderDosDescriptors* d) {
 		return false;
 	for (unsigned i = 0; i < d->component_count; ++i) {
 		unsigned id = order[i];
+		/* Match Dos94_DRAW_drawcraft: BSP geometry can contain optional leaves
+		 * without a gameplay descriptor (Star Destroyer: 14 meshes, 13 descriptors). */
 		if (id >= d->count || id >= XW_DOS_COMPONENTS)
-			return false;
+			continue;
 		uint16_t selected;
 		if (!Variant(d, id, c->craft->component_state[id], &selected))
 			return false;
@@ -247,6 +249,15 @@ bool XwDosShip_Select(const XwRenderSnapshot* s, const XwRenderAssetSet* set, co
 		if (image < 0x8000) {
 			if (c.model == 43 && object->id.kind == XW_SNAP_OBJECT_MOBILE)
 				c.model = object->source_type;
+			/* Detached-component animation uses a shared 0..8 component program.
+			 * Some source craft have fewer meshes. Classic ComponentLods returns
+			 * NULL for these optional fragments and drawcomponent draws nothing.
+			 * Keep DOS93 CRFT clamping and reject malformed valid LOD ranges. */
+			if (object->type == 43 && c.model < set->type_count) {
+				const XwRenderDosModel* source = Model(set->types[c.model].geometry);
+				if (source && !source->clamp_components && image >= source->component_count)
+					continue;
+			}
 			if (!Geometry(&c, c.model, image, i, false))
 				return false;
 			continue;

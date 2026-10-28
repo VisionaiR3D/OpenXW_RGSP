@@ -13,6 +13,31 @@
 #include <aeron/compat/host.h>
 #include <string.h>
 
+
+#include "xw_runtime/input/combos.h"
+#include "xw_runtime/input/lead_solution.h"
+#include "xw_runtime/runtime/flight_types.h"
+#include "xw/flight/player/user.h"
+#include "xw/flight/object/object.h"
+#include "xw/flight/object/create.h"
+#include "xw/flight/xw.h"
+#include "xw/flight/object/laser.h"
+static void CaptureLead(XwRenderSnapshot*out){
+ out->lead_visible=0;
+ if(!XwCombos_LeadEnabled()||!out->world_valid||out->camera.external||out->camera.replay_mode||
+    (out->camera.hud_state!=0&&out->camera.hud_state!=18&&out->camera.hud_state!=19)||g_playerFlightState.selectedWeaponMode)return;
+ unsigned ref=g_playerFlightState.currentTargetObjectIdx,bank=g_playerFlightState.selectedWeaponBank;
+ ObjectRecord*p=g_playerFlightState.object;
+ if(!p||!g_playerFlightState.craft||ref>=XW_CRAFT_OBJECT_COUNT||ref==g_playerFlightState.objectIndex||bank>=4||g_playerFlightState.craftTypeIndex>=XW_CRAFT_TYPE_COUNT)return;
+ ObjectRecord*o=&g_objectTable[ref];
+ if(!XwRenderObjects_Id(ref).kind||o->familyId!=XW_OBJECT_FAMILY_CRAFT||!o->instanceData)return;
+ int type=XwFlightTypes_ProjectileIndex(g_craftTypeDefs[g_playerFlightState.craftTypeIndex].laserGroupWeaponType[bank]);
+ if(type<0||type>=6)return;
+ int32_t from[]={p->worldX,p->worldY,p->worldZ},target[]={o->worldX,o->worldY,o->worldZ};
+ int16_t direction[]={o->moveX,o->moveY,o->moveZ};
+ out->lead_visible=LeadSolution(from,target,direction,o->speed,p->speed+g_projectileSpeedByType[type],g_projectileLifetimeSecondsByType[type],out->lead_world_pos);
+}
+
 static XwRenderSnapshot pending;
 static XwRenderSurfaceState surfaces[XW_RENDER_SURFACE_COUNT];
 static uint64_t mission, world, view_serial, completion_serial, pending_serial, write_serial;
@@ -182,6 +207,8 @@ void XwRenderCapture_CaptureWorld(void) {
 	bool camera_valid = XwRenderCamera_Capture(&out->camera);
 	XwRenderCamera_Appearance(&out->appearance);
 	out->world_valid = XwRenderObjects_Capture(out) && camera_valid;
+	if (version != 98 && out->world_valid) XwHud_DosTarget();
+ CaptureLead(out);
 	if (!XwRenderWorld_Capture(out) || !XwRenderSky_Capture(out))
 		out->world_valid = 0;
 }

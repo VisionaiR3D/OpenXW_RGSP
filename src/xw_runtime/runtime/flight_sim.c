@@ -1,4 +1,5 @@
 #include "xw_runtime/runtime/flight_sim.h"
+#include "xw_runtime/storage/save_slots.h"
 #include "xw_dos94/audio/gamesnd.h"
 #include "xw_dos94/render/display.h"
 #include "xw_runtime/audio/flight_music.h"
@@ -64,7 +65,6 @@
 #include "xw_runtime/runtime/presentation.h"
 #include "xw_runtime/timing/flight_timing.h"
 #include "xw_runtime/timing/host_clock.h"
-#include <landru/host_timing.h>
 #include <landru/task.h>
 #include <landru/timer.h>
 #include <stdlib.h>
@@ -262,6 +262,7 @@ static void sim_restore_checkpoint(FlightSimState* state, bool retained) {
 		XwPort_Fail("Cannot restore flight replay input");
 		return;
 	}
+
 	if (!retained) {
 		FlightDisplay_LockSurface();
 		XwFlightMode_LoadResources();

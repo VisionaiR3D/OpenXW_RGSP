@@ -161,6 +161,66 @@ static bool Upload(AeronCommandBuffer* cmd, AeronBuffer** out, const void* data,
 	return *out && Aeron_UploadBufferDataCmd(cmd, *out, 0, data, (uint32_t)size);
 }
 
+/* Optional HD exterior for the isolated RGSP test build. Local, versioned assets. */
+static bool HdRead(FILE* f, void* p, size_t size) { return fread(p, 1, size, f) == size; }
+#include "xw_remaster/hd_graphics.inc"
+static bool HdLoad(AeronCommandBuffer* cmd, XwDosMeshBuild* b, XwDosMesh* out, unsigned model_id) {
+ if (!XwHdGraphics_Active()) return false;
+ char path[80];
+ if(model_id==1)snprintf(path,sizeof path,"hd/xwing.hdmesh");else snprintf(path,sizeof path,"hd/model-%u.hdmesh",model_id);
+ FILE* f=fopen(path,"rb");
+ if(!f)return false;
+ char magic[8];uint32_t header[3],ranges[64][3];
+ bool ok=HdRead(f,magic,8)&&!memcmp(magic,"XWHD0001",8)&&HdRead(f,header,sizeof header);
+ ok=ok&&header[0]>0&&header[0]<=120000&&header[1]>0&&header[1]<=360000&&header[1]%3==0&&header[2]>0&&header[2]<=64&&header[2]==b->model->component_count;
+ XwDosVertex* v=NULL;uint32_t* idx=NULL;
+ if(ok){v=malloc(header[0]*sizeof *v);idx=malloc(header[1]*sizeof *idx);ok=v&&idx;}
+ if(ok)ok=HdRead(f,ranges,header[2]*sizeof ranges[0])&&HdRead(f,v,header[0]*sizeof *v)&&HdRead(f,idx,header[1]*sizeof *idx)&&fgetc(f)==EOF;
+ fclose(f);
+ for(unsigned i=0;ok&&i<header[0];++i){
+  const float* fields=(const float*)&v[i];
+  for(unsigned j=0;j<23;++j)if(!isfinite(fields[j]))ok=false;
+  for(unsigned j=0;j<3;++j)if(fabsf(v[i].position[j])>32768)ok=false;
+  if(v[i].info[1]==82 && (v[i].info[3]<1 || v[i].info[3]>8 || v[i].info[2]<0 || v[i].info[2]>=v[i].info[3]*v[i].info[3]))ok=false;
+  if(v[i].info[1]!=18&&v[i].info[1]!=50&&v[i].info[1]!=82&&v[i].info[1]!=146&&v[i].info[1]!=210)ok=false;
+ }
+ for(unsigned i=0;ok&&i<header[1];++i)if(idx[i]>=header[0])ok=false;
+ for(unsigned i=0;ok&&i<header[2];++i)if(ranges[i][0]!=b->model->components[i].first||ranges[i][0]>=out->lod_count||ranges[i][1]>header[1]||ranges[i][2]>header[1]-ranges[i][1]||ranges[i][2]%3)ok=false;
+ AeronTexture* texture=NULL;
+ if(ok){
+  if(model_id==1)snprintf(path,sizeof path,"hd/xwing.hdtex");else snprintf(path,sizeof path,"hd/model-%u.hdtex",model_id);
+  f=fopen(path,"rb");uint32_t levels=0,wh[2]={0},width=0,height=0;
+  ok=f&&HdRead(f,magic,8)&&!memcmp(magic,"XWHT0001",8)&&HdRead(f,&levels,4)&&levels>0&&levels<=12&&HdRead(f,wh,8);
+  width=wh[0];height=wh[1];
+  ok=ok&&width>0&&height>0&&width<=2048&&height<=2048&&!(width&(width-1))&&!(height&(height-1));
+  unsigned expected=1;for(unsigned size=width>height?width:height;size>1;size>>=1)++expected;
+  ok=ok&&levels==expected;
+  if(ok)texture=Aeron_CreateTexture(&(AeronTextureDesc){.width=width,.height=height,.mip_count=levels,.format=AERON_TEXTURE_FORMAT_RGBA8_SRGB,.usage=AERON_TEXTURE_USAGE_SAMPLED|AERON_TEXTURE_USAGE_TRANSFER_DST});
+  ok=ok&&texture;
+  for(unsigned l=0;ok&&l<levels;++l){
+   unsigned w=width>>l,h=height>>l;if(!w)w=1;if(!h)h=1;
+   ok=(!l||HdRead(f,wh,8))&&wh[0]==w&&wh[1]==h;
+   size_t size=w*h*4;void* pixels=ok?malloc(size):NULL;ok=ok&&pixels;
+   if(ok)ok=HdRead(f,pixels,size)&&Aeron_UploadTextureDataCmd(cmd,&(AeronTextureUploadDesc){.texture=texture,.mip_level=l,.width=w,.height=h,.raw_data=pixels,.raw_size=size});
+   free(pixels);
+  }
+  if(f){if(ok)ok=fgetc(f)==EOF;fclose(f);}
+ }
+ if(ok)ok=XwDosMesh_Grow((void**)&b->vertices,&b->vertex_capacity,b->vertex_count+header[0],sizeof *v)&&XwDosMesh_Grow((void**)&b->indices,&b->index_capacity,b->index_count+header[1],sizeof *idx);
+ if(ok){
+  unsigned base=b->vertex_count,first=b->index_count;
+  memcpy(b->vertices+base,v,header[0]*sizeof *v);
+  for(unsigned i=0;i<header[1];++i)b->indices[first+i]=base+idx[i];
+  b->vertex_count+=header[0];b->index_count+=header[1];
+  for(unsigned i=0;i<header[2];++i){XwDosMeshLod* lod=&out->lods[ranges[i][0]];lod->triangles=(XwSnapRange){first+ranges[i][1],ranges[i][2]};lod->lines.count=0;lod->hd=true;
+   for(unsigned j=0;j<ranges[i][2];++j){float* p=v[idx[ranges[i][1]+j]].position;lod->radius=fmaxf(lod->radius,sqrtf(p[0]*p[0]+p[1]*p[1]+p[2]*p[2]));}
+  }
+  out->hd_texture=texture;fprintf(stderr,"HD model %u loaded: %u vertices, %u triangles\n",model_id,header[0],header[1]/3);
+ }else{Aeron_DestroyTexture(texture);fprintf(stderr,"HD model %u unavailable/invalid; using original geometry\n",model_id);}
+ free(v);free(idx);return ok;
+}
+
+
 bool XwDosMesh_Build(AeronCommandBuffer* cmd, const XwRenderSource* source, XwDosMesh* out, char* error,
 					 size_t capacity) {
 	if (!cmd || !source || source->kind != XW_SOURCE_DOS_MODEL || source->size != sizeof(XwRenderDosModel))
@@ -174,7 +234,12 @@ bool XwDosMesh_Build(AeronCommandBuffer* cmd, const XwRenderSource* source, XwDo
 	ok = ok && out->lods;
 	for (unsigned i = 0; ok && i < out->lod_count; ++i)
 		ok = Lod(&b, &b.model->lods[i], &out->lods[i]);
-	size_t vb = b.vertex_count * sizeof *b.vertices, ib = b.index_count * sizeof *b.indices;
+	if(ok && source->flight_version == 94 && source->path) {
+        const char* suffix=strrchr(source->path,'/');
+        unsigned model_id=0;char trailing=0;
+        if(suffix && sscanf(suffix,"/model-%u%c",&model_id,&trailing)==1 && model_id>=1 && model_id<=118) HdLoad(cmd,&b,out,model_id);
+    }
+    size_t vb = b.vertex_count * sizeof *b.vertices, ib = b.index_count * sizeof *b.indices;
 	size_t mb = b.mark_count * sizeof *b.marks, mv = b.mark_vertex_count * sizeof *b.mark_vertices;
 	ok = ok && vb + ib + mb + mv <= MAX_BUFFER_BYTES;
 	if (ok)
@@ -195,6 +260,7 @@ bool XwDosMesh_Build(AeronCommandBuffer* cmd, const XwRenderSource* source, XwDo
 }
 
 void XwDosMesh_Destroy(XwDosMesh* mesh) {
+	Aeron_DestroyTexture(mesh->hd_texture);
 	Aeron_DestroyBuffer(mesh->vertices);
 	Aeron_DestroyBuffer(mesh->indices);
 	Aeron_DestroyBuffer(mesh->marks);

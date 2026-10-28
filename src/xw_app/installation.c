@@ -304,7 +304,7 @@ bool XwInstallation_Open(XwInstallation* out, XwGameVersion version, const char*
 		}
 	}
 	AeronVfs* vfs = AeronVfs_Create(
-		&(AeronVfsConfig) { .org_name = "TotallyOpen", .app_name = "OpenXW", .asset_root = normalized });
+		&(AeronVfsConfig) { .org_name = "TotallyOpen", .app_name = "OpenXW-HD", .asset_root = normalized });
 	if (!vfs) {
 		snprintf(error, capacity, "Could not open this game folder. Please try again.");
 		return false;

@@ -312,6 +312,8 @@ typedef struct XwRenderSnapshot {
 	XwSnapHyperspace hyperspace;
 	XwSnapSpecialWorld special;
 	XwSnapTargetBox target_box;
+ uint8_t lead_visible;
+ int32_t lead_world_pos[3];
 	uint32_t object_count, craft_count;
 	XwSnapObject objects[XW_SNAP_OBJECTS];
 	XwSnapCraft crafts[XW_SNAP_CRAFTS];

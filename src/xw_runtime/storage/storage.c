@@ -326,7 +326,7 @@ int XwStorage_ResolveInstallation(const char* path, char* resolved, size_t capac
 	if (strlen(candidate) >= capacity)
 		return 0;
 	vfs = AeronVfs_Create(
-		&(AeronVfsConfig) { .org_name = "TotallyOpen", .app_name = "OpenXW", .asset_root = candidate });
+		&(AeronVfsConfig) { .org_name = "TotallyOpen", .app_name = "OpenXW-HD", .asset_root = candidate });
 	if (!vfs)
 		return 0;
 	success = AeronVfs_Stat(vfs, AERON_VFS_ROOT_ASSET, "", &info) && info.exists && info.is_directory;

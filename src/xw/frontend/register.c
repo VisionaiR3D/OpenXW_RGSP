@@ -1321,6 +1321,13 @@ void register_idraw_Reg_String_Button(Input* input, Rect* frame, Rect* clip, int
 int16_t register_iupdate_Reg_String_Button(Input* input, Rect* frame, Rect* clip, int16_t key, int leftEvent,
 										   int rightEvent, int16_t x, int16_t y) {
 	REGISTER_RegStringButton* button = (REGISTER_RegStringButton*)input;
+#ifdef XW_MODERN
+ if(leftEvent) {
+  extern void XwPilotKeyboard_Request(REGISTER_RegStringButton*,int);
+  XwPilotKeyboard_Request(button,16);
+ }
+#endif
+
 	char workingText[REGISTER_STRING_WORK_CAPACITY];
 	int16_t index;
 	int16_t length;

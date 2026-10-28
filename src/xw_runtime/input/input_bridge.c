@@ -1,5 +1,6 @@
 /* Raw text conversion follows OpenXvT; the queue exposes Landru's BIOS key contract. */
 #include "xw_runtime/input/input_bridge.h"
+#include "xw_runtime/input/combos.h"
 #include "xw/flight/feinput.h"
 #include "xw/flight/flight_input.h"
 #include "xw/flight/player/user.h"
@@ -38,7 +39,8 @@ static int modifiers, mouse_x, mouse_y, delta_x, delta_y, mouse_buttons;
 static int pending_mouse_presses, observed_mouse_presses;
 static XwKeyboardRoute route = XW_KEYBOARD_BLOCKED;
 static bool suppressed_frame;
-static uint8_t flight_keys[KEY_CAPACITY];
+/* Custom menu commands exceed 255; preserve their complete action IDs. */
+static uint16_t flight_keys[KEY_CAPACITY];
 static unsigned flight_read, flight_write;
 static uint64_t reacquire_frame = UINT64_MAX, config_generation;
 static XwKeyboardBindings installed_keyboard;
@@ -186,6 +188,18 @@ static void UpdateJoystick(void);
 static unsigned FlightKey(AeronKeyChord chord);
 static unsigned int VirtualKey(int key);
 
+
+/* RG SP has no analog stick: use explicit menu mouse input, keeping flight
+ * joystick input separate and avoiding a second joystick cursor update. */
+static const AeronControllerSnapshot* HandheldMenuPad(const AeronInputSnapshot* input) {
+ if(!input || !input->has_focus || !XwFrontend_IsActive() || XwPort_SettingsOpen()) return NULL;
+ for(int i=0;i<AERON_CONTROLLER_MAX;i++) {
+  const AeronControllerSnapshot* d=&input->controllers[i];
+  if(d->connected && !strcmp(d->name,"H700 Gamepad")) return d;
+ }
+ return NULL;
+}
+
 void XwInput_BeginFrame(const AeronInputSnapshot* input, bool suppressed, int32_t delta_us) {
 	if (!input) {
 		XwInput_Reset();
@@ -198,7 +212,7 @@ void XwInput_BeginFrame(const AeronInputSnapshot* input, bool suppressed, int32_
 	suppressed = suppressed || !input->has_focus;
 	suppressed_frame = suppressed;
 	XwInput_ReconcileKeyboard();
-	XwControllerMapping_Update(input);
+	XwControllerMapping_Update(XwCombos_Filter(input));
 	XwFlightControls_UpdateThrottleContext();
 	XwInput_UpdateMouseCapture(input, delta_us);
 	XwKeyboardMapping_BeginFrame(input);
@@ -267,8 +281,33 @@ void XwInput_BeginFrame(const AeronInputSnapshot* input, bool suppressed, int32_
 		XwInput_Text(input);
 	int x, y;
 	bool inside = XwPresentation_MouseToScene(input, &x, &y) != 0;
+ static bool host_valid; static float host_x,host_y;
+ bool host_changed=!host_valid || host_x!=input->mouse.raw_x || host_y!=input->mouse.raw_y;
+ host_valid=true; host_x=input->mouse.raw_x; host_y=input->mouse.raw_y;
+ if(!host_changed && !input->mouse.relative_x && !input->mouse.relative_y &&
+    !input->mouse.pressed_buttons && !input->mouse.released_buttons) { x=mouse_x; y=mouse_y; }
 	if (!inside)
 		XwInput_BlockMouseButtons(input->mouse.buttons | input->mouse.pressed_buttons);
+ const AeronControllerSnapshot* menu_pad=HandheldMenuPad(input);
+ static float pad_fraction_x,pad_fraction_y;
+ if(menu_pad) {
+  Rect bounds; xsurface_Get_Logical_Bounds(&bounds);
+  unsigned b=menu_pad->gamepad_buttons;
+  int dx=((b>>AERON_GAMEPAD_BUTTON_DPAD_RIGHT)&1)-((b>>AERON_GAMEPAD_BUTTON_DPAD_LEFT)&1);
+  int dy=((b>>AERON_GAMEPAD_BUTTON_DPAD_DOWN)&1)-((b>>AERON_GAMEPAD_BUTTON_DPAD_UP)&1);
+  float dt=delta_us/1000000.0f; if(dt>0.05f) dt=0.05f;
+  pad_fraction_x=dx ? pad_fraction_x+dx*160.0f*dt : 0;
+  pad_fraction_y=dy ? pad_fraction_y+dy*160.0f*dt : 0;
+  int sx=(int)pad_fraction_x,sy=(int)pad_fraction_y;
+  pad_fraction_x-=sx; pad_fraction_y-=sy;
+  x=(io_module_gbl ? mouse_cursor_x_gbl : mouse_x)+sx;
+  y=(io_module_gbl ? mouse_cursor_y_gbl : mouse_y)+sy;
+  if(x<0) x=0;
+  if(x>=bounds.right) x=bounds.right-1;
+  if(y<0) y=0;
+  if(y>=bounds.bottom) y=bounds.bottom-1;
+  inside=true;
+ } else { pad_fraction_x=pad_fraction_y=0; }
 	delta_x += have_pointer ? x - mouse_x : 0;
 	delta_y += have_pointer ? y - mouse_y : 0;
 	mouse_x = x;
@@ -291,6 +330,16 @@ void XwInput_BeginFrame(const AeronInputSnapshot* input, bool suppressed, int32_
 		if (down)
 			mouse_buttons |= 1 << i;
 	}
+ if(menu_pad) {
+  unsigned states=menu_pad->gamepad_buttons,edges=menu_pad->gamepad_pressed_buttons,ups=menu_pad->gamepad_released_buttons;
+  const int buttons[]={AERON_GAMEPAD_BUTTON_SOUTH,AERON_GAMEPAD_BUTTON_EAST};
+  for(int i=0;i<2;i++) {
+   if(states&(1u<<buttons[i])) { mouse_buttons|=1<<i; g_winMouseButtonDown[i]=1; }
+   if(edges&(1u<<buttons[i])) { pending_mouse_presses|=1<<i; g_winMouseButtonPressed[i]=1; }
+   if(ups&(1u<<buttons[i])) g_winMouseButtonReleased[i]=1;
+  }
+ }
+
 }
 
 int XwInput_KeyPending(void) {
@@ -349,7 +398,7 @@ void XwInput_QueueFlightKey(uint16_t key) {
 		Aeron_LogWarn("xw.input", "Flight command queue is full");
 		return;
 	}
-	flight_keys[flight_write] = (uint8_t)key;
+	flight_keys[flight_write] = key;
 	flight_write = next;
 }
 
@@ -476,6 +525,11 @@ static void UpdateJoystick(void) {
 		joystick.axes[3] = 32768 + 256 * XwControllerMapping_MenuAxis(XW_INPUT_AXIS_ROLL);
 		joystick.pov_direction = hat & 1 ? 0 : hat & 2 ? 1 : hat & 4 ? 2 : hat & 8 ? 3 : -1;
 	}
+ if(HandheldMenuPad(Aeron_InputSnapshot())) {
+  joystick.axes[0]=joystick.axes[1]=32768;
+  joystick.buttons=0; joystick.pov_direction=-1;
+ }
+
 }
 
 uint32_t XwInput_JoystickRead(int32_t* x, int32_t* y, int32_t* z, int16_t device) {

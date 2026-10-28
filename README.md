@@ -1,3 +1,5 @@
+> Anbernic RGSP fork: see [RGSP features and build notes](README-RGSP.md).
+
 # OpenXW
 
 [![GitHub Release](https://img.shields.io/github/v/release/elyosh/OpenXW)](https://github.com/elyosh/OpenXW/releases/latest)

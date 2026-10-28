@@ -223,7 +223,7 @@ void Flet640_end_View(int unusedTime) {
 #endif
 	}
 	if (shellext_Check_Scene_Exit(&exitScene, nextScene, nextSection,
-								  g_flet640Film->cur_cel == g_flet640Film->cels) != 0) {
+								  !g_flet640Film || g_flet640Film->cur_cel == g_flet640Film->cels) != 0) {
 		xerror_Set_Landru_Exit(exitScene);
 	}
 }
@@ -333,7 +333,7 @@ void Flet640_user_DirtyBounds(Actor* actor, int unusedTime) {
 void Flet640_user_Close(Actor* actor, int unusedTime) {
 	Rect frame;
 	(void)unusedTime;
-	if (g_flet640Film->cur_cel == g_flet640Film->cels) {
+	if (!g_flet640Film || g_flet640Film->cur_cel == g_flet640Film->cels) {
 		xcanvas_Get_Drawing_Canvas_Bounds(&frame);
 		actor->var1 = 1;
 	} else {
